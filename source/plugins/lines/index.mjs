@@ -12,7 +12,7 @@ export default async function({login, data, imports, rest, q, account}, {enabled
 
     //Context
     let context = {mode: "user"}
-    if (data.account)
+    if (data.account === "organization")
       context = {...context, mode: "organization"}
     else if (q.repo) {
       console.debug(`metrics/compute/${login}/plugins > people > switched to repository mode`)
