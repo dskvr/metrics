@@ -111,6 +111,24 @@ inputs:
       - collaborator
       - organization_member
 
+  repositories_included:
+    description: |
+      Repository owners included in aggregate metrics
+    type: array
+    format:
+      - newline-separated
+      - comma-separated
+    default: ""
+
+  repositories_maintained_forks:
+    description: |
+      Forks maintained as successor projects and included in aggregate metrics
+    type: array
+    format:
+      - newline-separated
+      - comma-separated
+    default: ""
+
   repositories_skipped:
     description: |
       Default skipped repositories

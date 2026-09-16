@@ -7,8 +7,10 @@
 export default async function({login, graphql, rest, data, q, queries, imports, callbacks}, conf) {
   //Load inputs
   console.debug(`metrics/compute/${login}/base > started`)
-  let {indepth, hireable, skip, "repositories.forks": _forks, "repositories.affiliations": _affiliations, "repositories.batch": _batch} = imports.metadata.plugins.base.inputs({data, q, account: "bypass"})
+  let {indepth, hireable, skip, "repositories.forks": _forks, "repositories.affiliations": _affiliations, "repositories.batch": _batch, "repositories.included": _included, "repositories.maintained.forks": _maintained_forks} = imports.metadata.plugins.base.inputs({data, q, account: "bypass"})
   const repositories = conf.settings.repositories || 100
+  const included = new Set(_included.map(owner => owner.toLocaleLowerCase()))
+  const maintainedForks = new Set(_maintained_forks.map(repository => repository.toLocaleLowerCase()))
   const forks = _forks ? "" : ", isFork: false"
   const affiliations = _affiliations?.length ? `, ownerAffiliations: [${_affiliations.map(x => x.toLocaleUpperCase()).join(", ")}]${conf.authenticated === login ? `, affiliations: [${_affiliations.map(x => x.toLocaleUpperCase()).join(", ")}]` : ""}` : ""
   console.debug(`metrics/compute/${login}/base > affiliations constraints ${affiliations}`)
@@ -150,10 +152,11 @@ export default async function({login, graphql, rest, data, q, queries, imports, 
         data.user[type] = data.user[type] ?? {}
         data.user[type].nodes = data.user[type].nodes ?? []
         do {
+          const pageSize = Math.min(repositories, {user: _batch, organization: Math.min(25, _batch)}[account])
           console.debug(`metrics/compute/${login}/base > retrieving ${type} after ${cursor}`)
           const request = {}
           try {
-            Object.assign(request, await graphql(queries.base.repositories({login, account, type, after: cursor ? `after: "${cursor}"` : "", repositories: Math.min(repositories, {user: _batch, organization: Math.min(25, _batch)}[account]), ...options})))
+            Object.assign(request, await graphql(queries.base.repositories({login, account, type, after: cursor ? `after: "${cursor}"` : "", repositories: pageSize, ...options})))
           }
           catch (error) {
             console.debug(`metrics/compute/${login}/base > failed to retrieve ${_batch} repositories after ${cursor}, this is probably due to an API timeout, halving batch`)
@@ -169,7 +172,7 @@ export default async function({login, graphql, rest, data, q, queries, imports, 
           data.user[type].nodes.push(...nodes)
           pushed = nodes.length
           console.debug(`metrics/compute/${login}/base > retrieved ${pushed} ${type} after ${cursor}`)
-          if (pushed < repositories) {
+          if (pushed < pageSize) {
             console.debug(`metrics/compute/${login}/base > retrieved less repositories than expected, probably no more to fetch`)
             break
           }
@@ -178,7 +181,25 @@ export default async function({login, graphql, rest, data, q, queries, imports, 
         //Limit repositories
         console.debug(`metrics/compute/${login}/base > keeping only ${repositories} ${type}`)
         data.user[type].nodes.splice(repositories)
+        if (included.size) {
+          data.user[type].nodes = data.user[type].nodes.filter(({isFork, name, owner}) => {
+            const handle = `${owner.login}/${name}`.toLocaleLowerCase()
+            return included.has(owner.login.toLocaleLowerCase()) && ((!isFork) || maintainedForks.has(handle))
+          })
+          data.user[type].totalCount = data.user[type].nodes.length
+        }
         console.debug(`metrics/compute/${login}/base > loaded ${data.user[type].nodes.length} ${type}`)
+      }
+      if ((account === "user") && included.size) {
+        const commitTotals = await Promise.all([...included].map(async owner => {
+          const qualifier = owner === login.toLocaleLowerCase() ? `user:${owner}` : `org:${owner}`
+          const {data: {total_count: total = 0}} = await rest.search.commits({q: `author:${login} ${qualifier}`, per_page: 1})
+          return total
+        }))
+        data.user.contributionsCollection.totalCommitContributions = commitTotals.reduce((sum, total) => sum + total, 0)
+        data.user.contributionsCollection.restrictedContributionsCount = 0
+        data.user.repositories.totalCount = data.user.repositories.nodes.length
+        data.user.repositories.totalDiskUsage = data.user.repositories.nodes.reduce((sum, repository) => sum + (repository.diskUsage ?? 0), 0)
       }
       //Fetch missing packages count from ghcr.io using REST API (as GraphQL API does not support it yet)
       try {

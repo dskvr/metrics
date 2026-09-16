@@ -38,6 +38,14 @@ inputs:
     description: Repositories affiliations
     default: <default-value>
 
+  repositories_included:
+    description: Repository owners included in aggregate metrics
+    default: <default-value>
+
+  repositories_maintained_forks:
+    description: Forks maintained as successor projects
+    default: <default-value>
+
   repositories_skipped:
     description: Default skipped repositories
     default: <default-value>
