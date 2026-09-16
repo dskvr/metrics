@@ -12,23 +12,26 @@ test("small pages aggregate selected owners and a maintained fork", async () => 
     {name: "shell", owner: {login: "kehto"}, diskUsage: 40},
   ]
   const pages = []
+  let failures = 0
   const graphql = async query => {
     if (query.kind === "user") return {user: {login: "dskvr", createdAt: "2020-01-01"}}
     if (query.kind === "bulk") return {user: {repositories: {}, repositoriesContributedTo: {}, packages: {totalCount: 0}, contributionsCollection: {totalCommitContributions: 0}}}
     if (query.type === "repositoriesContributedTo") return {user: {repositoriesContributedTo: {nodes: [], edges: []}}}
+    if (query.repositories > 2) { failures++; throw new Error("502 Bad Gateway") }
     const offset = Number(query.after.match(/[0-9]+/)?.[0] ?? 0)
     const page = nodes.slice(offset, offset + query.repositories)
     pages.push(offset)
     return {user: {repositories: {nodes: page, edges: page.map((_, i) => ({cursor: String(offset + i + 1)}))}}}
   }
   const data = {base: {}}
-  const inputs = {"repositories.forks": true, "repositories.affiliations": ["owner", "organization_member"], "repositories.batch": 2, "repositories.included": ["dskvr", "sandwichfarm", "napplet", "kehto"], "repositories.maintained.forks": ["sandwichfarm/nsyte"], "repositories.skipped": [], "users.ignored": [], "commits.authoring": ["dskvr"]}
+  const inputs = {"repositories.forks": true, "repositories.affiliations": ["owner", "organization_member"], "repositories.batch": 4, "repositories.included": ["dskvr", "sandwichfarm", "napplet", "kehto"], "repositories.maintained.forks": ["sandwichfarm/nsyte"], "repositories.skipped": [], "users.ignored": [], "commits.authoring": ["dskvr"]}
   await base({login: "dskvr", data, q: {}, graphql,
     queries: {base: {user: () => ({kind: "user"}), "user.x": () => ({kind: "bulk"}), repositories: query => query}},
     imports: {metadata: {plugins: {base: {inputs: () => inputs}}}},
     rest: {search: {commits: async () => ({data: {total_count: 5}})}, packages: {listPackagesForUser: async () => ({data: []})}},
   }, {authenticated: "dskvr", settings: {repositories: 100, plugins: {base: {parts: []}}}})
   assert.deepEqual(pages, [0, 2, 4, 6])
+  assert.equal(failures, 1)
   assert.deepEqual(data.user.repositories.nodes.map(repository => repository.name), ["personal", "nsyte", "sdk", "shell"])
   assert.equal(data.user.repositories.totalCount, 4)
   assert.equal(data.user.repositories.totalDiskUsage, 100)
